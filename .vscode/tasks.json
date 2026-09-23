@@ -3,20 +3,24 @@
     "tasks": [
         {
             "type": "shell",
-            "label": "Build OpenGL",
+            "label": "Build Main",
             "command": "C:/msys64/mingw64/bin/g++.exe",
             "args": [
                 "-g",
-                "-std=c++17",
+                "-std=c++20",
                 "-I${workspaceFolder}/include",
+                "-I${workspaceFolder}/src",
                 "-L${workspaceFolder}/lib",
                 "${workspaceFolder}/src/main.cpp",
+                "${workspaceFolder}/src/core/glfw_context.cpp",
+                "${workspaceFolder}/src/core/window.cpp",
+                "${workspaceFolder}/src/core/input.cpp",
                 "${workspaceFolder}/src/glad.c",
                 "-lglfw3dll",
                 "-lopengl32",
                 "-lgdi32",
                 "-o",
-                "${workspaceFolder}/ZMMR.exe"
+                "${workspaceFolder}/main.exe"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
@@ -28,6 +32,36 @@
                 "kind": "build",
                 "isDefault": true
             },
+            "detail": "compiler: C:/msys64/mingw64/bin/g++.exe"
+        },
+        {
+            "type": "shell",
+            "label": "Build Triangle Example",
+            "command": "C:/msys64/mingw64/bin/g++.exe",
+            "args": [
+                "-g",
+                "-std=c++20",
+                "-I${workspaceFolder}/include",
+                "-I${workspaceFolder}/src",
+                "-L${workspaceFolder}/lib",
+                "${workspaceFolder}/src/examples/triangle.cpp",
+                "${workspaceFolder}/src/core/glfw_context.cpp",
+                "${workspaceFolder}/src/core/window.cpp",
+                "${workspaceFolder}/src/core/input.cpp",
+                "${workspaceFolder}/src/glad.c",
+                "-lglfw3dll",
+                "-lopengl32",
+                "-lgdi32",
+                "-o",
+                "${workspaceFolder}/triangle.exe"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
             "detail": "compiler: C:/msys64/mingw64/bin/g++.exe"
         }
     ]
