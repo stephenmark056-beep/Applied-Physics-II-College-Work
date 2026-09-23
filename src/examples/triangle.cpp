@@ -1,135 +1,123 @@
-#include <glad/glad.h>  
-#include <GLFW/glfw3.h>
+#include <glad/glad.h>
+
+#include <cstdlib>
+#include <exception>
 #include <iostream>
+#include <stdexcept>
+#include <string>
 
-const char* vertexShaderSource = "#version 330 core\n"
-    "layout (location = 0) in vec3 aPos;\n"
-    "void main()\n"
-    "{\n"
-    "   gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
-    "}\0";
+#include "core/glfw_context.h"
+#include "core/input.h"
+#include "core/window.h"
 
-const char* fragmentShaderSource = "#version 330 core\n"
-    "out vec4 FragColor;\n"
-    "void main()\n"
-    "{\n"
-    "   FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);\n"
-    "}\n\0";
+namespace {
 
-int main()
-{
-    // Initialize GLFW
-    glfwInit();
+constexpr const char* kVertexShaderSource = R"(#version 330 core
+layout (location = 0) in vec3 aPos;
+void main() { gl_Position = vec4(aPos, 1.0); }
+)";
 
-    // Let GLFW know what OpenGL profile is used
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+constexpr const char* kFragmentShaderSource = R"(#version 330 core
+out vec4 FragColor;
+void main() { FragColor = vec4(1.0, 0.5, 0.2, 1.0); }
+)";
 
-    // Coordinates for our points
-    float vertices[] = { 
-        -0.5f, -0.5f, 0.0f,
-         0.5f, -0.5f, 0.0f,
-         0.0f,  0.5f, 0.0f
-    };
+struct TriangleMesh {
+    GLuint vao = 0;
+    GLuint vbo = 0;
+};
 
-    // Create window
-    GLFWwindow* window = glfwCreateWindow(800, 600, "APPLPHY2", NULL, NULL);
-    if (window == NULL) {
-        std::cout << "Failed to create GLFW window" << std::endl;
-        glfwTerminate();
-        return -1;
+GLuint compileShader(GLenum type, const char* source) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+
+    GLint compiled = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        char log[512];
+        glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+        glDeleteShader(shader);
+        throw std::runtime_error(std::string("Shader compilation failed: ") + log);
     }
+    return shader;
+}
 
-    // Use created window
-    glfwMakeContextCurrent(window);
+GLuint createProgram(const char* vertexSource, const char* fragmentSource) {
+    GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
+    GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
 
-    // Load OpenGL functions + error handling
-    gladLoadGL();
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        std::cout << "Failed to initialize GLAD" << std::endl;
-        return -1;
-    }
-    
-    // Create vertext shader
-    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    // Store vertext shader source into shader
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    // Compile
-    glCompileShader(vertexShader);
-    
-    // Create fragment shader
-    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    // Store fragment shader source into shader
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    // Compile
-    glCompileShader(fragmentShader);
-
-    // Create program object
-    unsigned int shaderProgram = glCreateProgram();
-
-    // Link shaders to program object
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    // Cleanup shader objects since they're now in program
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
-    // Buffer to hold shader data and how to interpret that data
-    unsigned int VAO, VBO;
+    GLint linked = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[512];
+        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+        glDeleteProgram(program);
+        throw std::runtime_error(std::string("Program linking failed: ") + log);
+    }
+    return program;
+}
 
-    // Generate Buffer and Vertex Array
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);  
+TriangleMesh createTriangleMesh() {
+    constexpr float vertices[] = {
+        -0.5f, -0.5f, 0.0f,
+         0.5f, -0.5f, 0.0f,
+         0.0f,  0.5f, 0.0f,
+    };
 
-    // Binds VAO
-    glBindVertexArray(VAO);
+    TriangleMesh mesh;
+    glGenVertexArrays(1, &mesh.vao);
+    glGenBuffers(1, &mesh.vbo);
 
-    // Binds VBO
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    // Stores our vertices into the VBO
+    glBindVertexArray(mesh.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    // Configures Vertex Array to tell OpenGL how to interpret data
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    // Enable it
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
-    
-    // Clean Up
+
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
+    return mesh;
+}
 
-    // Prepare to change the buffer with this color
-    glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+}  // namespace
 
-    // Rendering loop
-    while (!glfwWindowShouldClose(window)) {
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-            glfwSetWindowShouldClose(window, true);
+int main() {
+    try {
+        gfx::GlfwContext glfw;
+        gfx::Window window({.width = 800, .height = 600, .title = "Triangle"});
 
-        glClear(GL_COLOR_BUFFER_BIT);
-        
-        glUseProgram(shaderProgram);
-        glBindVertexArray(VAO);
+        GLuint program = createProgram(kVertexShaderSource, kFragmentShaderSource);
+        TriangleMesh mesh = createTriangleMesh();
 
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 
-        glfwPollEvents();
-        glfwSwapBuffers(window);
+        while (!window.shouldClose()) {
+            gfx::processInput(window);
+
+            glClear(GL_COLOR_BUFFER_BIT);
+            glUseProgram(program);
+            glBindVertexArray(mesh.vao);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+
+            window.swapBuffers();
+            window.pollEvents();
+        }
+
+        glDeleteVertexArrays(1, &mesh.vao);
+        glDeleteBuffers(1, &mesh.vbo);
+        glDeleteProgram(program);
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << '\n';
+        return EXIT_FAILURE;
     }
 
-    // Cleanup
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
-    glDeleteProgram(shaderProgram);
-
-    // Destroy window
-    glfwDestroyWindow(window);
-    // Terminate GLFW
-    glfwTerminate();
-
-    return 0;
+    return EXIT_SUCCESS;
 }
