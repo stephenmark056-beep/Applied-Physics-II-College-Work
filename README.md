@@ -1,10 +1,14 @@
 # OpenGL Setup
 
 A verified base environment for OpenGL development in C++. GLFW and GLAD are
-already vendored and the VS Code / Cursor build task is wired up. All you
+already vendored and the VS Code / Cursor build tasks are wired up. All you
 need to do is confirm your local toolchain can compile and run it. If
-`src/main.cpp` builds and prints `Setup OK`, your environment is ready for
-OpenGL work.
+`src/main.cpp` builds and opens a teal window that closes when you press
+`Esc`, your environment is ready for OpenGL work.
+
+The window, GLFW and GLAD setup, and input handling are already done in
+`src/core/`, so `src/main.cpp` is an empty render loop you can start drawing
+in.
 
 ## Prerequisites
 
@@ -35,8 +39,34 @@ ever needs to be regenerated or replaced:
 1. Clone this repo.
 2. Open `.vscode/tasks.json` and edit the `"command"` field to point at your
    own `g++.exe` (e.g. `C:/msys64/mingw64/bin/g++.exe`).
-3. Run the build task.
-4. Confirm the program prints `Setup OK`.
+3. Run the `Build Main` task, then run `main.exe`.
+4. Confirm a teal window opens and `Esc` closes it.
+5. Optionally run the `Build Triangle Example` task and `triangle.exe` to
+   see an orange triangle.
+
+## Project structure
+
+```
+src/
+  main.cpp                empty boilerplate: window, clear color, input, loop
+  glad.c                  vendored GLAD loader
+  core/
+    glfw_context.h/.cpp   gfx::GlfwContext, initializes and terminates GLFW
+    window.h/.cpp         gfx::Window, creates the window and loads GLAD
+    input.h/.cpp          gfx::processInput, keyboard handling
+  examples/
+    triangle.cpp          triangle rendered on top of core/
+```
+
+Everything in `core/` lives in the `gfx` namespace and uses RAII: an object
+sets up its resource in its constructor and releases it in its destructor, so
+cleanup happens on every exit path. Startup failures throw
+`std::runtime_error`, which `main` catches and prints.
+
+To start a new exercise, put your rendering code inside the loop in
+`src/main.cpp`. You shouldn't need to edit `src/core/`.
+
+The project builds as C++20 (`-std=c++20`).
 
 ## PATH requirement
 
