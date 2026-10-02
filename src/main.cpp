@@ -130,8 +130,22 @@ void updateBall(Ball& ball, float deltaTime) {
 }
 
 void resolveWallCollision(Ball& ball) {
-    // Wall bounce removed: the ball can move past the bounds without reversing.
-    (void)ball;
+    if (ball.posX - ball.radius < -1.0f) {
+        ball.posX = -1.0f + ball.radius;
+        ball.velX = -ball.velX;
+    }
+    if (ball.posX + ball.radius > 1.0f) {
+        ball.posX = 1.0f - ball.radius;
+        ball.velX = -ball.velX;
+    }
+    if (ball.posY - ball.radius < -1.0f) {
+        ball.posY = -1.0f + ball.radius;
+        ball.velY = -ball.velY;
+    }
+    if (ball.posY + ball.radius > 1.0f) {
+        ball.posY = 1.0f - ball.radius;
+        ball.velY = -ball.velY;
+    }
 }
 
 bool checkBallCollision(const Ball&a, const Ball& b) {
