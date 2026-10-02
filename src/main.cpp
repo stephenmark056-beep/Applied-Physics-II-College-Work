@@ -204,6 +204,7 @@ int main() {
 
         std::vector<Ball> balls = {
             {-0.5f, 0.3f, 0.6f, 0.4f, kBallRadius},
+            {0.4f, 0.2f, -0.5f, 0.3f, kBallRadius}
         };
 
         glClearColor(0.04f, 0.42f, 0.24f, 1.0f);
@@ -224,13 +225,6 @@ int main() {
         resolveWallCollision(ball);
     }
 
-    for (size_t i = 0; i < balls.size(); ++i) {
-        for (size_t j = i + 1; j < balls.size(); ++j) {
-            if (checkBallCollision(balls[i], balls[j])) {
-                std::cout << "Collision detected!\n";
-            }
-        }
-    }
             glClear(GL_COLOR_BUFFER_BIT);
             for (const Ball& ball : balls) {
                 drawBall(program, mesh, ball);
