@@ -190,7 +190,7 @@ void resolveBallCollision(Ball& a, Ball& b) {
     correctPenetration(a, b, normal, distance);
 }
 
-} 
+} // namespace
 
 int main() {
     try {
@@ -199,12 +199,9 @@ int main() {
 
         GLuint program = createProgram(kVertexShaderSource, kFragmentShaderSource);
         CircleMesh mesh = createCircleMesh(generateCircleVertices(kBallRadius, kCircleSegments));
-
-            // Lets add more Balls to the simulation Later On
-
         std::vector<Ball> balls = {
             {-0.5f, 0.3f, 0.6f, 0.4f, kBallRadius},
-            {0.4f, 0.2f, -0.5f, 0.3f, kBallRadius}
+            {0.4f, 0.2f, -0.5f, 0.3f, kBallRadius},
         };
 
         glClearColor(0.04f, 0.42f, 0.24f, 1.0f);
@@ -218,20 +215,19 @@ int main() {
 
             gfx::processInput(window);
 
-            // Ill update it later on so that we can move the balls for know lets just render a static 2D ball on the screen 
-
-                for (Ball& ball : balls) {
-        updateBall(ball, deltaTime);
-        resolveWallCollision(ball);
-    }
-
-    for (size_t i = 0; i < balls.size(); ++i) {
-        for (size_t j = i + 1; j < balls.size(); ++j) {
-            if (checkBallCollision(balls[i], balls[j])) {
-                std::cout << "Collision detected!\n";
+            for (Ball& ball : balls) {
+                updateBall(ball, deltaTime);
+                resolveWallCollision(ball);
             }
-        }
-    }
+
+            for (size_t i = 0; i < balls.size(); ++i) {
+                for (size_t j = i + 1; j < balls.size(); ++j) {
+                    if (checkBallCollision(balls[i], balls[j])) {
+                        resolveBallCollision(balls[i], balls[j]);
+                    }
+                }
+            }
+
             glClear(GL_COLOR_BUFFER_BIT);
             for (const Ball& ball : balls) {
                 drawBall(program, mesh, ball);
