@@ -4,7 +4,7 @@
         {
             "type": "shell",
             "label": "Build Main",
-            "command": "C:/msys64/mingw64/bin/g++.exe",
+            "command": "g++",
             "args": [
                 "-g",
                 "-std=c++20",
@@ -32,12 +32,12 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "detail": "compiler: C:/msys64/mingw64/bin/g++.exe"
+            "detail": "g++"
         },
         {
             "type": "shell",
             "label": "Build Triangle Example",
-            "command": "C:/msys64/mingw64/bin/g++.exe",
+            "command": "g++",
             "args": [
                 "-g",
                 "-std=c++20",
@@ -62,7 +62,7 @@
                 "$gcc"
             ],
             "group": "build",
-            "detail": "compiler: C:/msys64/mingw64/bin/g++.exe"
+            "detail": "g++"
         }
     ]
 }
