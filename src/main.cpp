@@ -225,6 +225,13 @@ int main() {
         resolveWallCollision(ball);
     }
 
+    for (size_t i = 0; i < balls.size(); ++i) {
+        for (size_t j = i + 1; j < balls.size(); ++j) {
+            if (checkBallCollision(balls[i], balls[j])) {
+                std::cout << "Collision detected!\n";
+            }
+        }
+    }
             glClear(GL_COLOR_BUFFER_BIT);
             for (const Ball& ball : balls) {
                 drawBall(program, mesh, ball);
