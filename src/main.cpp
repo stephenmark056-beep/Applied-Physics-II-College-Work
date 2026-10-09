@@ -15,15 +15,24 @@
 
 namespace {
 
-constexpr float kBallRadius = 0.1f;
 constexpr int kCircleSegments = 40;
 constexpr float kPi = 3.14159265358979323846f;
+constexpr float kPointRadius = 0.03f;
+constexpr float kRestitution = 0.4f;
+constexpr float kGravity = -1.8f;
+constexpr float kStiffness = 400.0f;
+constexpr float kDamping = 4.0f;
 
-
-struct Ball {
+struct PointMass {
     float posX, posY;
-    float velX, velY;
-    float radius;
+    float prevX, prevY;
+    float accelX, accelY;
+    float mass;
+};
+
+struct Spring {
+    int a, b;
+    float restLength;
 };
 
 struct Vec2 {
@@ -32,13 +41,13 @@ struct Vec2 {
 
 constexpr const char* kVertexShaderSource = R"(#version 330 core
 layout (location = 0) in vec2 aPos;
-uniform vec2 uCenter;
-void main() { gl_Position = vec4(aPos + uCenter, 0.0, 1.0); }
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
 )";
 
 constexpr const char* kFragmentShaderSource = R"(#version 330 core
 out vec4 FragColor;
-void main() { FragColor = vec4(0.85, 0.85, 0.9, 1.0); }
+uniform vec4 uColor;
+void main() { FragColor = uColor; }
 )";
 
 GLuint compileShader(GLenum type, const char* source) {
@@ -92,102 +101,94 @@ std::vector<float> generateCircleVertices(float radius, int segments) {
     return vertices;
 }
 
-struct CircleMesh {
+GLuint createDynamicVao(GLuint& vbo) {
     GLuint vao = 0;
-    GLuint vbo = 0;
-    GLsizei vertexCount = 0;
-};
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
 
-CircleMesh createCircleMesh(const std::vector<float>& vertices) {
-    CircleMesh mesh;
-    mesh.vertexCount = static_cast<GLsizei>(vertices.size() / 2);
-
-    glGenVertexArrays(1, &mesh.vao);
-    glGenBuffers(1, &mesh.vbo);
-
-    glBindVertexArray(mesh.vao);
-    glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(),
-                 GL_STATIC_DRAW);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
-    return mesh;
+    return vao;
 }
 
-void drawBall(GLuint program, const CircleMesh& mesh, const Ball& ball) {
-    glUseProgram(program);
-    glUniform2f(glGetUniformLocation(program, "uCenter"), ball.posX, ball.posY);
-    glBindVertexArray(mesh.vao);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, mesh.vertexCount);
+void uploadDynamic(GLuint vbo, const std::vector<float>& data) {
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, data.size() * sizeof(float), data.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-void updateBall(Ball& ball, float deltaTime) {
-    ball.posX += ball.velX * deltaTime;
-    ball.posY += ball.velY * deltaTime;
-}
-
-void resolveWallCollision(Ball& ball) {
-    if (ball.posX - ball.radius < -1.0f) {
-        ball.posX = -1.0f + ball.radius;
-        ball.velX = -ball.velX;
-    }
-    if (ball.posX + ball.radius > 1.0f) {
-        ball.posX = 1.0f - ball.radius;
-        ball.velX = -ball.velX;
-    }
-    if (ball.posY - ball.radius < -1.0f) {
-        ball.posY = -1.0f + ball.radius;
-        ball.velY = -ball.velY;
-    }
-    if (ball.posY + ball.radius > 1.0f) {
-        ball.posY = 1.0f - ball.radius;
-        ball.velY = -ball.velY;
-    }
-}
-
-bool checkBallCollision(const Ball&a, const Ball& b) {
+float distance(const PointMass& a, const PointMass& b) {
     float dx = b.posX - a.posX;
     float dy = b.posY - a.posY;
-    float distance = sqrt(dx * dx + dy * dy);
-    return distance < (a.radius + b.radius);
+    return sqrtf(dx * dx + dy * dy);
 }
 
-Vec2 computeCollisionNormal(const Ball& a, const Ball& b, float& outDistance) {
-    float dx = b.posX - a.posX;
-    float dy = b.posY - a.posY;
-    outDistance = sqrt(dx * dx + dy * dy);
-    return { dx / outDistance, dy / outDistance };
-}
- 
-void exchangeNormalVelocity(Ball& a, Ball& b, const Vec2& normal) {
-    float dotA = a.velX * normal.x + a.velY * normal.y;
-    float dotB = b.velX * normal.x + b.velY * normal.y;
+void applySpringForce(std::vector<PointMass>& points, const Spring& spring, float deltaTime) {
+    PointMass& a = points[spring.a];
+    PointMass& b = points[spring.b];
 
-    a.velX += (dotB - dotA) * normal.x;
-    a.velY += (dotB - dotA) * normal.y;
-    b.velX += (dotA - dotB) * normal.x;
-    b.velY += (dotA - dotB) * normal.y;
-}
+    float dist = distance(a, b);
+    if (dist < 1e-6f) return;
 
-void correctPenetration(Ball& a, Ball& b, const Vec2& normal, float distance) {
-    float overlap = (a.radius + b.radius) - distance;
-    float pushEach = overlap / 2.0f;
+    Vec2 dir = {(b.posX - a.posX) / dist, (b.posY - a.posY) / dist};
+    float stretch = dist - spring.restLength;
+    float aVelX = deltaTime > 0.0f ? (a.posX - a.prevX) / deltaTime : 0.0f;
+    float aVelY = deltaTime > 0.0f ? (a.posY - a.prevY) / deltaTime : 0.0f;
+    float bVelX = deltaTime > 0.0f ? (b.posX - b.prevX) / deltaTime : 0.0f;
+    float bVelY = deltaTime > 0.0f ? (b.posY - b.prevY) / deltaTime : 0.0f;
+    float relVelAlongDir = (bVelX - aVelX) * dir.x + (bVelY - aVelY) * dir.y;
+    float forceMagnitude = kStiffness * stretch + kDamping * relVelAlongDir;
 
-    a.posX -= normal.x * pushEach;
-    a.posY -= normal.y * pushEach;
-    b.posX += normal.x * pushEach;
-    b.posY += normal.y * pushEach;
+    float forceX = dir.x * forceMagnitude;
+    float forceY = dir.y * forceMagnitude;
+
+    a.accelX += forceX / a.mass;
+    a.accelY += forceY / a.mass;
+    b.accelX -= forceX / b.mass;
+    b.accelY -= forceY / b.mass;
 }
 
-void resolveBallCollision(Ball& a, Ball& b) {
-    float distance;
-    Vec2 normal = computeCollisionNormal(a, b, distance);
+void applyGravity(PointMass& point) {
+    point.accelY += kGravity;
+}
 
-    exchangeNormalVelocity(a, b, normal);
-    correctPenetration(a, b, normal, distance);
+void updatePoint(PointMass& point, float deltaTime) {
+    float nextX = point.posX + (point.posX - point.prevX) + point.accelX * deltaTime * deltaTime;
+    float nextY = point.posY + (point.posY - point.prevY) + point.accelY * deltaTime * deltaTime;
+    point.prevX = point.posX;
+    point.prevY = point.posY;
+    point.posX = nextX;
+    point.posY = nextY;
+    point.accelX = 0.0f;
+    point.accelY = 0.0f;
+}
+
+void resolveWallCollision(PointMass& point) {
+    if (point.posX - kPointRadius < -1.0f) {
+        float displacement = point.posX - point.prevX;
+        point.posX = -1.0f + kPointRadius;
+        point.prevX = point.posX + displacement;
+    }
+    if (point.posX + kPointRadius > 1.0f) {
+        float displacement = point.posX - point.prevX;
+        point.posX = 1.0f - kPointRadius;
+        point.prevX = point.posX + displacement;
+    }
+    if (point.posY - kPointRadius < -1.0f) {
+        float displacement = point.posY - point.prevY;
+        point.posY = -1.0f + kPointRadius;
+        point.prevY = point.posY + kRestitution * displacement;
+    }
+    if (point.posY + kPointRadius > 1.0f) {
+        float displacement = point.posY - point.prevY;
+        point.posY = 1.0f - kPointRadius;
+        point.prevY = point.posY + displacement;
+    }
 }
 
 } // namespace
@@ -198,10 +199,28 @@ int main() {
         gfx::Window window({.width = 600, .height = 600, .title = "Billiards Sim"});
 
         GLuint program = createProgram(kVertexShaderSource, kFragmentShaderSource);
-        CircleMesh mesh = createCircleMesh(generateCircleVertices(kBallRadius, kCircleSegments));
-        std::vector<Ball> balls = {
-            {-0.5f, 0.3f, 0.6f, 0.4f, kBallRadius},
-            {0.4f, 0.2f, -0.5f, 0.3f, kBallRadius},
+        GLint colorLoc = glGetUniformLocation(program, "uColor");
+        std::vector<float> circleVerts = generateCircleVertices(kPointRadius, kCircleSegments);
+        GLuint circleVbo = 0;
+        GLuint circleVao = createDynamicVao(circleVbo);
+        GLsizei circleVertexCount = static_cast<GLsizei>(circleVerts.size() / 2);
+        GLuint lineVbo = 0;
+        GLuint lineVao = createDynamicVao(lineVbo);
+
+        std::vector<PointMass> points = {
+            {-0.2621f, 0.7063f, -0.2621f, 0.7063f, 0.0f, 0.0f, 1.0f},
+            {0.1063f, 0.8621f, 0.1063f, 0.8621f, 0.0f, 0.0f, 1.0f},
+            {0.2621f, 0.4937f, 0.2621f, 0.4937f, 0.0f, 0.0f, 1.0f},
+            {-0.1063f, 0.3379f, -0.1063f, 0.3379f, 0.0f, 0.0f, 1.0f},
+        };
+
+        std::vector<Spring> springs = {
+            {0, 1, distance(points[0], points[1])},
+            {1, 2, distance(points[1], points[2])},
+            {2, 3, distance(points[2], points[3])},
+            {3, 0, distance(points[3], points[0])},
+            {0, 2, distance(points[0], points[2])},
+            {1, 3, distance(points[1], points[3])},
         };
 
         glClearColor(0.04f, 0.42f, 0.24f, 1.0f);
@@ -215,30 +234,51 @@ int main() {
 
             gfx::processInput(window);
 
-            for (Ball& ball : balls) {
-                updateBall(ball, deltaTime);
-                resolveWallCollision(ball);
+            for (const Spring& spring : springs) {
+                applySpringForce(points, spring, deltaTime);
             }
 
-            for (size_t i = 0; i < balls.size(); ++i) {
-                for (size_t j = i + 1; j < balls.size(); ++j) {
-                    if (checkBallCollision(balls[i], balls[j])) {
-                        resolveBallCollision(balls[i], balls[j]);
-                    }
-                }
+            for (PointMass& point : points) {
+                applyGravity(point);
+                updatePoint(point, deltaTime);
+                resolveWallCollision(point);
             }
 
             glClear(GL_COLOR_BUFFER_BIT);
-            for (const Ball& ball : balls) {
-                drawBall(program, mesh, ball);
+            glUseProgram(program);
+
+            std::vector<float> lineVerts;
+            for (const Spring& spring : springs) {
+                lineVerts.push_back(points[spring.a].posX);
+                lineVerts.push_back(points[spring.a].posY);
+                lineVerts.push_back(points[spring.b].posX);
+                lineVerts.push_back(points[spring.b].posY);
+            }
+            uploadDynamic(lineVbo, lineVerts);
+            glUniform4f(colorLoc, 0.31f, 0.76f, 0.97f, 1.0f);
+            glBindVertexArray(lineVao);
+            glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(lineVerts.size() / 2));
+
+            glUniform4f(colorLoc, 0.85f, 0.85f, 0.9f, 1.0f);
+            glBindVertexArray(circleVao);
+            for (const PointMass& point : points) {
+                std::vector<float> translated = circleVerts;
+                for (size_t i = 0; i < translated.size(); i += 2) {
+                    translated[i] += point.posX;
+                    translated[i + 1] += point.posY;
+                }
+                uploadDynamic(circleVbo, translated);
+                glDrawArrays(GL_TRIANGLE_FAN, 0, circleVertexCount);
             }
 
             window.swapBuffers();
             window.pollEvents();
         }
 
-        glDeleteVertexArrays(1, &mesh.vao);
-        glDeleteBuffers(1, &mesh.vbo);
+        glDeleteVertexArrays(1, &circleVao);
+        glDeleteBuffers(1, &circleVbo);
+        glDeleteVertexArrays(1, &lineVao);
+        glDeleteBuffers(1, &lineVbo);
         glDeleteProgram(program);
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';
