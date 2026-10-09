@@ -18,7 +18,6 @@ namespace {
 constexpr int kCircleSegments = 40;
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kPointRadius = 0.03f;
-constexpr float kRestitution = 0.4f;
 constexpr float kGravity = -1.8f;
 constexpr int kConstraintIterations = 5;
 
@@ -198,9 +197,8 @@ void resolveWallCollision(PointMass& point) {
         point.prevX = point.posX + displacement;
     }
     if (point.posY - kPointRadius < -1.0f) {
-        float displacement = point.posY - point.prevY;
         point.posY = -1.0f + kPointRadius;
-        point.prevY = point.posY + kRestitution * displacement;
+        point.prevY = point.posY;
     }
     if (point.posY + kPointRadius > 1.0f) {
         float displacement = point.posY - point.prevY;
