@@ -20,13 +20,14 @@ constexpr float kPi = 3.14159265358979323846f;
 constexpr float kPointRadius = 0.03f;
 constexpr float kRestitution = 0.4f;
 constexpr float kGravity = -1.8f;
-constexpr int kConstraintIterations = 8;
+constexpr int kConstraintIterations = 5;
 
 struct PointMass {
     float posX, posY;
     float prevX, prevY;
     float accelX, accelY;
     float mass;
+    bool pinned;
 };
 
 struct StickConstraint {
@@ -132,8 +133,8 @@ void solveStickConstraint(std::vector<PointMass>& points, const StickConstraint&
     float dist = sqrtf(dx * dx + dy * dy);
     if (dist < 1e-6f) return;
 
-    float inverseMassA = 1.0f / a.mass;
-    float inverseMassB = 1.0f / b.mass;
+    float inverseMassA = a.pinned ? 0.0f : 1.0f / a.mass;
+    float inverseMassB = b.pinned ? 0.0f : 1.0f / b.mass;
     float inverseMassSum = inverseMassA + inverseMassB;
     if (inverseMassSum <= 0.0f) return;
 
@@ -159,10 +160,20 @@ void solveStickConstraint(std::vector<PointMass>& points, const StickConstraint&
 }
 
 void applyGravity(PointMass& point) {
-    point.accelY += kGravity;
+    if (!point.pinned) {
+        point.accelY += kGravity;
+    }
 }
 
 void updatePoint(PointMass& point, float deltaTime) {
+    if (point.pinned) {
+        point.prevX = point.posX;
+        point.prevY = point.posY;
+        point.accelX = 0.0f;
+        point.accelY = 0.0f;
+        return;
+    }
+
     float nextX = point.posX + (point.posX - point.prevX) + point.accelX * deltaTime * deltaTime;
     float nextY = point.posY + (point.posY - point.prevY) + point.accelY * deltaTime * deltaTime;
     point.prevX = point.posX;
@@ -174,6 +185,8 @@ void updatePoint(PointMass& point, float deltaTime) {
 }
 
 void resolveWallCollision(PointMass& point) {
+    if (point.pinned) return;
+
     if (point.posX - kPointRadius < -1.0f) {
         float displacement = point.posX - point.prevX;
         point.posX = -1.0f + kPointRadius;
@@ -212,21 +225,25 @@ int main() {
         GLuint lineVbo = 0;
         GLuint lineVao = createDynamicVao(lineVbo);
 
-        std::vector<PointMass> points = {
-            {-0.2621f, 0.7063f, -0.2621f, 0.7063f, 0.0f, 0.0f, 1.0f},
-            {0.1063f, 0.8621f, 0.1063f, 0.8621f, 0.0f, 0.0f, 1.0f},
-            {0.2621f, 0.4937f, 0.2621f, 0.4937f, 0.0f, 0.0f, 1.0f},
-            {-0.1063f, 0.3379f, -0.1063f, 0.3379f, 0.0f, 0.0f, 1.0f},
-        };
+        constexpr int chainPointCount = 9;
+        constexpr float segmentLength = 0.18f;
+        constexpr float initialSwingDisplacement = 0.003f;
+        std::vector<PointMass> points;
+        std::vector<StickConstraint> sticks;
+        points.reserve(chainPointCount);
+        sticks.reserve(chainPointCount - 1);
 
-        std::vector<StickConstraint> sticks = {
-            {0, 1, distance(points[0], points[1])},
-            {1, 2, distance(points[1], points[2])},
-            {2, 3, distance(points[2], points[3])},
-            {3, 0, distance(points[3], points[0])},
-            {0, 2, distance(points[0], points[2])},
-            {1, 3, distance(points[1], points[3])},
-        };
+        for (int i = 0; i < chainPointCount; ++i) {
+            float x = 0.0f;
+            float y = 0.78f - i * segmentLength;
+            bool pinned = i == 0;
+            float previousX = x + (pinned ? 0.0f : initialSwingDisplacement);
+            points.push_back({x, y, previousX, y, 0.0f, 0.0f, 1.0f, pinned});
+
+            if (i > 0) {
+                sticks.push_back({i - 1, i, distance(points[i - 1], points[i])});
+            }
+        }
 
         glClearColor(0.04f, 0.42f, 0.24f, 1.0f);
 
