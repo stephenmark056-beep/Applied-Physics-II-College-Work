@@ -188,23 +188,20 @@ void resolveWallCollision(PointMass& point) {
     if (point.pinned) return;
 
     if (point.posX - kPointRadius < -1.0f) {
-        float displacement = point.posX - point.prevX;
         point.posX = -1.0f + kPointRadius;
-        point.prevX = point.posX + displacement;
+        point.prevX = point.posX;
     }
     if (point.posX + kPointRadius > 1.0f) {
-        float displacement = point.posX - point.prevX;
         point.posX = 1.0f - kPointRadius;
-        point.prevX = point.posX + displacement;
+        point.prevX = point.posX;
     }
     if (point.posY - kPointRadius < -1.0f) {
         point.posY = -1.0f + kPointRadius;
         point.prevY = point.posY;
     }
     if (point.posY + kPointRadius > 1.0f) {
-        float displacement = point.posY - point.prevY;
         point.posY = 1.0f - kPointRadius;
-        point.prevY = point.posY + displacement;
+        point.prevY = point.posY;
     }
 }
 
