@@ -20,8 +20,7 @@ constexpr float kPi = 3.14159265358979323846f;
 constexpr float kPointRadius = 0.03f;
 constexpr float kRestitution = 0.4f;
 constexpr float kGravity = -1.8f;
-constexpr float kStiffness = 400.0f;
-constexpr float kDamping = 4.0f;
+constexpr int kConstraintIterations = 8;
 
 struct PointMass {
     float posX, posY;
@@ -30,13 +29,9 @@ struct PointMass {
     float mass;
 };
 
-struct Spring {
+struct StickConstraint {
     int a, b;
     float restLength;
-};
-
-struct Vec2 {
-    float x, y;
 };
 
 constexpr const char* kVertexShaderSource = R"(#version 330 core
@@ -128,29 +123,39 @@ float distance(const PointMass& a, const PointMass& b) {
     return sqrtf(dx * dx + dy * dy);
 }
 
-void applySpringForce(std::vector<PointMass>& points, const Spring& spring, float deltaTime) {
-    PointMass& a = points[spring.a];
-    PointMass& b = points[spring.b];
+void solveStickConstraint(std::vector<PointMass>& points, const StickConstraint& constraint) {
+    PointMass& a = points[constraint.a];
+    PointMass& b = points[constraint.b];
 
-    float dist = distance(a, b);
+    float dx = b.posX - a.posX;
+    float dy = b.posY - a.posY;
+    float dist = sqrtf(dx * dx + dy * dy);
     if (dist < 1e-6f) return;
 
-    Vec2 dir = {(b.posX - a.posX) / dist, (b.posY - a.posY) / dist};
-    float stretch = dist - spring.restLength;
-    float aVelX = deltaTime > 0.0f ? (a.posX - a.prevX) / deltaTime : 0.0f;
-    float aVelY = deltaTime > 0.0f ? (a.posY - a.prevY) / deltaTime : 0.0f;
-    float bVelX = deltaTime > 0.0f ? (b.posX - b.prevX) / deltaTime : 0.0f;
-    float bVelY = deltaTime > 0.0f ? (b.posY - b.prevY) / deltaTime : 0.0f;
-    float relVelAlongDir = (bVelX - aVelX) * dir.x + (bVelY - aVelY) * dir.y;
-    float forceMagnitude = kStiffness * stretch + kDamping * relVelAlongDir;
+    float inverseMassA = 1.0f / a.mass;
+    float inverseMassB = 1.0f / b.mass;
+    float inverseMassSum = inverseMassA + inverseMassB;
+    if (inverseMassSum <= 0.0f) return;
 
-    float forceX = dir.x * forceMagnitude;
-    float forceY = dir.y * forceMagnitude;
+    float correction = (dist - constraint.restLength) / dist;
+    float correctionX = dx * correction;
+    float correctionY = dy * correction;
+    float correctionA = inverseMassA / inverseMassSum;
+    float correctionB = inverseMassB / inverseMassSum;
 
-    a.accelX += forceX / a.mass;
-    a.accelY += forceY / a.mass;
-    b.accelX -= forceX / b.mass;
-    b.accelY -= forceY / b.mass;
+    float moveAX = correctionX * correctionA;
+    float moveAY = correctionY * correctionA;
+    float moveBX = -correctionX * correctionB;
+    float moveBY = -correctionY * correctionB;
+
+    a.posX += moveAX;
+    a.posY += moveAY;
+    a.prevX += moveAX;
+    a.prevY += moveAY;
+    b.posX += moveBX;
+    b.posY += moveBY;
+    b.prevX += moveBX;
+    b.prevY += moveBY;
 }
 
 void applyGravity(PointMass& point) {
@@ -214,7 +219,7 @@ int main() {
             {-0.1063f, 0.3379f, -0.1063f, 0.3379f, 0.0f, 0.0f, 1.0f},
         };
 
-        std::vector<Spring> springs = {
+        std::vector<StickConstraint> sticks = {
             {0, 1, distance(points[0], points[1])},
             {1, 2, distance(points[1], points[2])},
             {2, 3, distance(points[2], points[3])},
@@ -234,25 +239,29 @@ int main() {
 
             gfx::processInput(window);
 
-            for (const Spring& spring : springs) {
-                applySpringForce(points, spring, deltaTime);
-            }
-
             for (PointMass& point : points) {
                 applyGravity(point);
                 updatePoint(point, deltaTime);
-                resolveWallCollision(point);
+            }
+
+            for (int iteration = 0; iteration < kConstraintIterations; ++iteration) {
+                for (const StickConstraint& stick : sticks) {
+                    solveStickConstraint(points, stick);
+                }
+                for (PointMass& point : points) {
+                    resolveWallCollision(point);
+                }
             }
 
             glClear(GL_COLOR_BUFFER_BIT);
             glUseProgram(program);
 
             std::vector<float> lineVerts;
-            for (const Spring& spring : springs) {
-                lineVerts.push_back(points[spring.a].posX);
-                lineVerts.push_back(points[spring.a].posY);
-                lineVerts.push_back(points[spring.b].posX);
-                lineVerts.push_back(points[spring.b].posY);
+            for (const StickConstraint& stick : sticks) {
+                lineVerts.push_back(points[stick.a].posX);
+                lineVerts.push_back(points[stick.a].posY);
+                lineVerts.push_back(points[stick.b].posX);
+                lineVerts.push_back(points[stick.b].posY);
             }
             uploadDynamic(lineVbo, lineVerts);
             glUniform4f(colorLoc, 0.31f, 0.76f, 0.97f, 1.0f);
