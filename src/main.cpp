@@ -1,6 +1,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -123,7 +124,7 @@ float distance(const PointMass& a, const PointMass& b) {
     return sqrtf(dx * dx + dy * dy);
 }
 
-void solveStickConstraint(std::vector<PointMass>& points, const StickConstraint& constraint) {
+void solveStickConstraint(std::vector<PointMass>& points, const StickConstraint& constraint, int draggedPoint) {
     PointMass& a = points[constraint.a];
     PointMass& b = points[constraint.b];
 
@@ -132,8 +133,8 @@ void solveStickConstraint(std::vector<PointMass>& points, const StickConstraint&
     float dist = sqrtf(dx * dx + dy * dy);
     if (dist < 1e-6f) return;
 
-    float inverseMassA = a.pinned ? 0.0f : 1.0f / a.mass;
-    float inverseMassB = b.pinned ? 0.0f : 1.0f / b.mass;
+    float inverseMassA = a.pinned || constraint.a == draggedPoint ? 0.0f : 1.0f / a.mass;
+    float inverseMassB = b.pinned || constraint.b == draggedPoint ? 0.0f : 1.0f / b.mass;
     float inverseMassSum = inverseMassA + inverseMassB;
     if (inverseMassSum <= 0.0f) return;
 
@@ -255,6 +256,8 @@ int main() {
         glClearColor(0.04f, 0.42f, 0.24f, 1.0f);
 
         float lastFrameTime = static_cast<float>(glfwGetTime());
+        int draggedPoint = -1;
+        bool wasMouseDown = false;
 
         while (!window.shouldClose()) {
             float currentFrameTime = static_cast<float>(glfwGetTime());
@@ -263,14 +266,61 @@ int main() {
 
             gfx::processInput(window);
 
-            for (PointMass& point : points) {
+            GLFWwindow* nativeWindow = glfwGetCurrentContext();
+            int windowWidth = 0;
+            int windowHeight = 0;
+            glfwGetWindowSize(nativeWindow, &windowWidth, &windowHeight);
+            double cursorX = 0.0;
+            double cursorY = 0.0;
+            glfwGetCursorPos(nativeWindow, &cursorX, &cursorY);
+
+            float mouseWorldX = static_cast<float>(cursorX / windowWidth * 2.0 - 1.0);
+            float mouseWorldY = static_cast<float>(1.0 - cursorY / windowHeight * 2.0);
+            mouseWorldX = std::max(-1.0f + kPointRadius, std::min(1.0f - kPointRadius, mouseWorldX));
+            mouseWorldY = std::max(-1.0f + kPointRadius, std::min(1.0f - kPointRadius, mouseWorldY));
+
+            bool mouseDown = glfwGetMouseButton(nativeWindow, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            if (mouseDown && !wasMouseDown) {
+                float pickRadius = kPointRadius * 2.0f;
+                float closestDistanceSquared = pickRadius * pickRadius;
+                draggedPoint = -1;
+                for (size_t i = 0; i < points.size(); ++i) {
+                    float dx = points[i].posX - mouseWorldX;
+                    float dy = points[i].posY - mouseWorldY;
+                    float distanceSquared = dx * dx + dy * dy;
+                    if (distanceSquared <= closestDistanceSquared) {
+                        closestDistanceSquared = distanceSquared;
+                        draggedPoint = static_cast<int>(i);
+                    }
+                }
+            }
+            if (!mouseDown) {
+                draggedPoint = -1;
+            }
+            wasMouseDown = mouseDown;
+
+            if (draggedPoint >= 0) {
+                PointMass& point = points[draggedPoint];
+                point.posX = mouseWorldX;
+                point.posY = mouseWorldY;
+                point.prevX = point.posX;
+                point.prevY = point.posY;
+                point.accelX = 0.0f;
+                point.accelY = 0.0f;
+            }
+
+            for (size_t i = 0; i < points.size(); ++i) {
+                PointMass& point = points[i];
+                if (static_cast<int>(i) == draggedPoint) {
+                    continue;
+                }
                 applyGravity(point);
                 updatePoint(point, deltaTime);
             }
 
             for (int iteration = 0; iteration < kConstraintIterations; ++iteration) {
                 for (const StickConstraint& stick : sticks) {
-                    solveStickConstraint(points, stick);
+                    solveStickConstraint(points, stick, draggedPoint);
                 }
                 for (PointMass& point : points) {
                     resolveWallCollision(point);
