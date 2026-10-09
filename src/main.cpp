@@ -1,5 +1,3 @@
-//Changes
-
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -227,25 +225,34 @@ int main() {
         GLuint lineVbo = 0;
         GLuint lineVao = createDynamicVao(lineVbo);
 
-        constexpr int chainPointCount = 9;
-        constexpr float segmentLength = 0.18f;
-        constexpr float initialSwingDisplacement = 0.003f;
         std::vector<PointMass> points;
         std::vector<StickConstraint> sticks;
-        points.reserve(chainPointCount);
-        sticks.reserve(chainPointCount - 1);
+        points = {
+            {0.0f, 0.72f, 0.0f, 0.72f, 0.0f, 0.0f, 1.0f, false},
+            {0.0f, 0.46f, 0.0f, 0.46f, 0.0f, 0.0f, 1.0f, false},
+            {0.0f, 0.16f, 0.0f, 0.16f, 0.0f, 0.0f, 1.0f, false},
+            {-0.25f, 0.40f, -0.25f, 0.40f, 0.0f, 0.0f, 1.0f, false},
+            {-0.44f, 0.31f, -0.44f, 0.31f, 0.0f, 0.0f, 1.0f, false},
+            {0.25f, 0.40f, 0.25f, 0.40f, 0.0f, 0.0f, 1.0f, false},
+            {0.44f, 0.31f, 0.44f, 0.31f, 0.0f, 0.0f, 1.0f, false},
+            {-0.13f, -0.13f, -0.13f, -0.13f, 0.0f, 0.0f, 1.0f, false},
+            {-0.22f, -0.40f, -0.22f, -0.40f, 0.0f, 0.0f, 1.0f, false},
+            {0.13f, -0.13f, 0.13f, -0.13f, 0.0f, 0.0f, 1.0f, false},
+            {0.22f, -0.40f, 0.22f, -0.40f, 0.0f, 0.0f, 1.0f, false},
+        };
 
-        for (int i = 0; i < chainPointCount; ++i) {
-            float x = 0.0f;
-            float y = 0.78f - i * segmentLength;
-            bool pinned = i == 0;
-            float previousX = x + (pinned ? 0.0f : initialSwingDisplacement);
-            points.push_back({x, y, previousX, y, 0.0f, 0.0f, 1.0f, pinned});
-
-            if (i > 0) {
-                sticks.push_back({i - 1, i, distance(points[i - 1], points[i])});
-            }
-        }
+        sticks = {
+            {0, 1, distance(points[0], points[1])},
+            {1, 2, distance(points[1], points[2])},
+            {1, 3, distance(points[1], points[3])},
+            {3, 4, distance(points[3], points[4])},
+            {1, 5, distance(points[1], points[5])},
+            {5, 6, distance(points[5], points[6])},
+            {2, 7, distance(points[2], points[7])},
+            {7, 8, distance(points[7], points[8])},
+            {2, 9, distance(points[2], points[9])},
+            {9, 10, distance(points[9], points[10])},
+        };
 
         glClearColor(0.04f, 0.42f, 0.24f, 1.0f);
 
