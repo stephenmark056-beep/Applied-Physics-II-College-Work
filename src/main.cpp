@@ -1,11 +1,9 @@
 #include <glad/glad.h>
-#include <GLFW/glfw3.h>
 
-#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
-#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -18,22 +16,11 @@ namespace {
 
 constexpr int kCircleSegments = 40;
 constexpr float kPi = 3.14159265358979323846f;
-constexpr float kPointRadius = 0.03f;
-constexpr float kGravity = -1.8f;
-constexpr int kConstraintIterations = 5;
-
-struct PointMass {
-    float posX, posY;
-    float prevX, prevY;
-    float accelX, accelY;
-    float mass;
-    bool pinned;
-};
-
-struct StickConstraint {
-    int a, b;
-    float restLength;
-};
+constexpr float kTurretX = 0.0f;
+constexpr float kTurretY = -0.85f;
+constexpr float kTurretRadius = 0.07f;
+constexpr float kShotRadius = 0.04f;
+constexpr float kAimLength = 0.25f;
 
 constexpr const char* kVertexShaderSource = R"(#version 330 core
 layout (location = 0) in vec2 aPos;
@@ -88,9 +75,9 @@ std::vector<float> generateCircleVertices(float radius, int segments) {
     std::vector<float> vertices;
     vertices.push_back(0.0f);
     vertices.push_back(0.0f);
-    
+
     for (int i = 0; i <= segments; ++i) {
-        float angle = (float)i/segments * 2.0f * kPi;
+        float angle = static_cast<float>(i) / segments * 2.0f * kPi;
         vertices.push_back(radius * cosf(angle));
         vertices.push_back(radius * sinf(angle));
     }
@@ -118,238 +105,57 @@ void uploadDynamic(GLuint vbo, const std::vector<float>& data) {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-float distance(const PointMass& a, const PointMass& b) {
-    float dx = b.posX - a.posX;
-    float dy = b.posY - a.posY;
-    return sqrtf(dx * dx + dy * dy);
-}
-
-void solveStickConstraint(std::vector<PointMass>& points, const StickConstraint& constraint, int draggedPoint) {
-    PointMass& a = points[constraint.a];
-    PointMass& b = points[constraint.b];
-
-    float dx = b.posX - a.posX;
-    float dy = b.posY - a.posY;
-    float dist = sqrtf(dx * dx + dy * dy);
-    if (dist < 1e-6f) return;
-
-    float inverseMassA = a.pinned || constraint.a == draggedPoint ? 0.0f : 1.0f / a.mass;
-    float inverseMassB = b.pinned || constraint.b == draggedPoint ? 0.0f : 1.0f / b.mass;
-    float inverseMassSum = inverseMassA + inverseMassB;
-    if (inverseMassSum <= 0.0f) return;
-
-    float correction = (dist - constraint.restLength) / dist;
-    float correctionX = dx * correction;
-    float correctionY = dy * correction;
-    float correctionA = inverseMassA / inverseMassSum;
-    float correctionB = inverseMassB / inverseMassSum;
-
-    float moveAX = correctionX * correctionA;
-    float moveAY = correctionY * correctionA;
-    float moveBX = -correctionX * correctionB;
-    float moveBY = -correctionY * correctionB;
-
-    a.posX += moveAX;
-    a.posY += moveAY;
-    a.prevX += moveAX;
-    a.prevY += moveAY;
-    b.posX += moveBX;
-    b.posY += moveBY;
-    b.prevX += moveBX;
-    b.prevY += moveBY;
-}
-
-void applyGravity(PointMass& point) {
-    if (!point.pinned) {
-        point.accelY += kGravity;
-    }
-}
-
-void updatePoint(PointMass& point, float deltaTime) {
-    if (point.pinned) {
-        point.prevX = point.posX;
-        point.prevY = point.posY;
-        point.accelX = 0.0f;
-        point.accelY = 0.0f;
-        return;
-    }
-
-    float nextX = point.posX + (point.posX - point.prevX) + point.accelX * deltaTime * deltaTime;
-    float nextY = point.posY + (point.posY - point.prevY) + point.accelY * deltaTime * deltaTime;
-    point.prevX = point.posX;
-    point.prevY = point.posY;
-    point.posX = nextX;
-    point.posY = nextY;
-    point.accelX = 0.0f;
-    point.accelY = 0.0f;
-}
-
-void resolveWallCollision(PointMass& point) {
-    if (point.pinned) return;
-
-    if (point.posX - kPointRadius < -1.0f) {
-        point.posX = -1.0f + kPointRadius;
-        point.prevX = point.posX;
-    }
-    if (point.posX + kPointRadius > 1.0f) {
-        point.posX = 1.0f - kPointRadius;
-        point.prevX = point.posX;
-    }
-    if (point.posY - kPointRadius < -1.0f) {
-        point.posY = -1.0f + kPointRadius;
-        point.prevY = point.posY;
-    }
-    if (point.posY + kPointRadius > 1.0f) {
-        point.posY = 1.0f - kPointRadius;
-        point.prevY = point.posY;
-    }
-}
-
 } // namespace
 
 int main() {
     try {
         gfx::GlfwContext glfw;
-        gfx::Window window({.width = 600, .height = 600, .title = "Billiards Sim"});
+        gfx::Window window({.width = 600, .height = 600, .title = "Unit I - Reyes"});
 
         GLuint program = createProgram(kVertexShaderSource, kFragmentShaderSource);
         GLint colorLoc = glGetUniformLocation(program, "uColor");
-        std::vector<float> circleVerts = generateCircleVertices(kPointRadius, kCircleSegments);
+        std::vector<float> turretVerts = generateCircleVertices(kTurretRadius, kCircleSegments);
+        std::vector<float> shotVerts = generateCircleVertices(kShotRadius, kCircleSegments);
         GLuint circleVbo = 0;
         GLuint circleVao = createDynamicVao(circleVbo);
-        GLsizei circleVertexCount = static_cast<GLsizei>(circleVerts.size() / 2);
         GLuint lineVbo = 0;
         GLuint lineVao = createDynamicVao(lineVbo);
 
-        std::vector<PointMass> points;
-        std::vector<StickConstraint> sticks;
-        points = {
-            {0.0f, 0.72f, 0.0f, 0.72f, 0.0f, 0.0f, 1.0f, false},
-            {0.0f, 0.46f, 0.0f, 0.46f, 0.0f, 0.0f, 1.0f, false},
-            {0.0f, 0.16f, 0.0f, 0.16f, 0.0f, 0.0f, 1.0f, false},
-            {-0.25f, 0.40f, -0.25f, 0.40f, 0.0f, 0.0f, 1.0f, false},
-            {-0.44f, 0.31f, -0.44f, 0.31f, 0.0f, 0.0f, 1.0f, false},
-            {0.25f, 0.40f, 0.25f, 0.40f, 0.0f, 0.0f, 1.0f, false},
-            {0.44f, 0.31f, 0.44f, 0.31f, 0.0f, 0.0f, 1.0f, false},
-            {-0.13f, -0.13f, -0.13f, -0.13f, 0.0f, 0.0f, 1.0f, false},
-            {-0.22f, -0.40f, -0.22f, -0.40f, 0.0f, 0.0f, 1.0f, false},
-            {0.13f, -0.13f, 0.13f, -0.13f, 0.0f, 0.0f, 1.0f, false},
-            {0.22f, -0.40f, 0.22f, -0.40f, 0.0f, 0.0f, 1.0f, false},
-        };
-
-        sticks = {
-            {0, 1, distance(points[0], points[1])},
-            {1, 2, distance(points[1], points[2])},
-            {1, 3, distance(points[1], points[3])},
-            {3, 4, distance(points[3], points[4])},
-            {1, 5, distance(points[1], points[5])},
-            {5, 6, distance(points[5], points[6])},
-            {2, 7, distance(points[2], points[7])},
-            {7, 8, distance(points[7], points[8])},
-            {2, 9, distance(points[2], points[9])},
-            {9, 10, distance(points[9], points[10])},
-        };
-
-        glClearColor(0.04f, 0.42f, 0.24f, 1.0f);
-
-        float lastFrameTime = static_cast<float>(glfwGetTime());
-        int draggedPoint = -1;
-        bool wasMouseDown = false;
+        glClearColor(0.08f, 0.28f, 0.42f, 1.0f);
 
         while (!window.shouldClose()) {
-            float currentFrameTime = static_cast<float>(glfwGetTime());
-            float deltaTime = currentFrameTime - lastFrameTime;
-            lastFrameTime = currentFrameTime;
-
             gfx::processInput(window);
-
-            GLFWwindow* nativeWindow = glfwGetCurrentContext();
-            int windowWidth = 0;
-            int windowHeight = 0;
-            glfwGetWindowSize(nativeWindow, &windowWidth, &windowHeight);
-            double cursorX = 0.0;
-            double cursorY = 0.0;
-            glfwGetCursorPos(nativeWindow, &cursorX, &cursorY);
-
-            float mouseWorldX = static_cast<float>(cursorX / windowWidth * 2.0 - 1.0);
-            float mouseWorldY = static_cast<float>(1.0 - cursorY / windowHeight * 2.0);
-            mouseWorldX = std::max(-1.0f + kPointRadius, std::min(1.0f - kPointRadius, mouseWorldX));
-            mouseWorldY = std::max(-1.0f + kPointRadius, std::min(1.0f - kPointRadius, mouseWorldY));
-
-            bool mouseDown = glfwGetMouseButton(nativeWindow, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-            if (mouseDown && !wasMouseDown) {
-                float pickRadius = kPointRadius * 2.0f;
-                float closestDistanceSquared = pickRadius * pickRadius;
-                draggedPoint = -1;
-                for (size_t i = 0; i < points.size(); ++i) {
-                    float dx = points[i].posX - mouseWorldX;
-                    float dy = points[i].posY - mouseWorldY;
-                    float distanceSquared = dx * dx + dy * dy;
-                    if (distanceSquared <= closestDistanceSquared) {
-                        closestDistanceSquared = distanceSquared;
-                        draggedPoint = static_cast<int>(i);
-                    }
-                }
-            }
-            if (!mouseDown) {
-                draggedPoint = -1;
-            }
-            wasMouseDown = mouseDown;
-
-            if (draggedPoint >= 0) {
-                PointMass& point = points[draggedPoint];
-                point.posX = mouseWorldX;
-                point.posY = mouseWorldY;
-                point.prevX = point.posX;
-                point.prevY = point.posY;
-                point.accelX = 0.0f;
-                point.accelY = 0.0f;
-            }
-
-            for (size_t i = 0; i < points.size(); ++i) {
-                PointMass& point = points[i];
-                if (static_cast<int>(i) == draggedPoint) {
-                    continue;
-                }
-                applyGravity(point);
-                updatePoint(point, deltaTime);
-            }
-
-            for (int iteration = 0; iteration < kConstraintIterations; ++iteration) {
-                for (const StickConstraint& stick : sticks) {
-                    solveStickConstraint(points, stick, draggedPoint);
-                }
-                for (PointMass& point : points) {
-                    resolveWallCollision(point);
-                }
-            }
 
             glClear(GL_COLOR_BUFFER_BIT);
             glUseProgram(program);
 
-            std::vector<float> lineVerts;
-            for (const StickConstraint& stick : sticks) {
-                lineVerts.push_back(points[stick.a].posX);
-                lineVerts.push_back(points[stick.a].posY);
-                lineVerts.push_back(points[stick.b].posX);
-                lineVerts.push_back(points[stick.b].posY);
+            std::vector<float> translatedTurret = turretVerts;
+            for (size_t i = 0; i < translatedTurret.size(); i += 2) {
+                translatedTurret[i] += kTurretX;
+                translatedTurret[i + 1] += kTurretY;
             }
-            uploadDynamic(lineVbo, lineVerts);
-            glUniform4f(colorLoc, 0.31f, 0.76f, 0.97f, 1.0f);
-            glBindVertexArray(lineVao);
-            glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(lineVerts.size() / 2));
-
-            glUniform4f(colorLoc, 0.85f, 0.85f, 0.9f, 1.0f);
+            uploadDynamic(circleVbo, translatedTurret);
+            glUniform4f(colorLoc, 0.55f, 0.55f, 0.58f, 1.0f);
             glBindVertexArray(circleVao);
-            for (const PointMass& point : points) {
-                std::vector<float> translated = circleVerts;
-                for (size_t i = 0; i < translated.size(); i += 2) {
-                    translated[i] += point.posX;
-                    translated[i + 1] += point.posY;
-                }
-                uploadDynamic(circleVbo, translated);
-                glDrawArrays(GL_TRIANGLE_FAN, 0, circleVertexCount);
+            glDrawArrays(GL_TRIANGLE_FAN, 0, static_cast<GLsizei>(turretVerts.size() / 2));
+
+            glBindVertexArray(lineVao);
+            std::vector<float> aimLineVerts = {
+                kTurretX, kTurretY + kTurretRadius,
+                kTurretX, kTurretY + kTurretRadius + kAimLength,
+            };
+            uploadDynamic(lineVbo, aimLineVerts);
+            glUniform4f(colorLoc, 1.0f, 1.0f, 1.0f, 1.0f);
+            glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(aimLineVerts.size() / 2));
+
+            std::vector<float> translatedShot = shotVerts;
+            for (size_t i = 0; i < translatedShot.size(); i += 2) {
+                translatedShot[i] += kTurretX;
+                translatedShot[i + 1] += kTurretY + kTurretRadius + kShotRadius;
             }
+            uploadDynamic(circleVbo, translatedShot);
+            glBindVertexArray(circleVao);
+            glDrawArrays(GL_TRIANGLE_FAN, 0, static_cast<GLsizei>(shotVerts.size() / 2));
 
             window.swapBuffers();
             window.pollEvents();
