@@ -19,12 +19,14 @@ namespace {
 
 constexpr int kCircleSegments = 40;
 constexpr float kPi = 3.14159265358979323846f;
+constexpr std::size_t kChainPointCount = 10;
+constexpr std::size_t kShapePointCount = 5;
 constexpr float kPointRadius = 0.03f;
-constexpr float kFloorY = -1.0f + kPointRadius;
+constexpr float kShapeRadius = 0.18f;
+constexpr float kPlayAreaSize = 600.0f;
 constexpr double kFixedDeltaTime = 1.0 / 60.0;
 constexpr float kGravity = -1.8f;
 constexpr int kConstraintIterations = 5;
-constexpr float kPlayAreaSize = 600.0f;
 
 constexpr const char* kVertexShaderSource = R"(#version 330 core
 layout (location = 0) in vec2 aPos;
@@ -40,12 +42,10 @@ void main() { FragColor = uColor; }
 struct SceneMesh {
     std::vector<float> vertices;
     GLsizei borderFirst = 0;
-    GLsizei borderCount = 0;
+    GLsizei borderVertexCount = 0;
     GLsizei sticksFirst = 0;
-    GLsizei sticksCount = 0;
-    GLsizei chainSticksCount = 0;
+    GLsizei sticksVertexCount = 0;
     GLsizei pointsFirst = 0;
-    GLsizei pointsCount = 0;
 };
 
 struct Particle {
@@ -117,48 +117,48 @@ void appendCircle(SceneMesh& mesh, float centerX, float centerY, float radius) {
     }
 }
 
-using Chain = std::array<Particle, 5>;
-using Wheel = std::array<Particle, 9>;
+using Chain = std::array<Particle, kChainPointCount>;
+using Shape = std::array<Particle, kShapePointCount>;
 
 void appendLine(SceneMesh& mesh, float x1, float y1, float x2, float y2) {
     mesh.vertices.insert(mesh.vertices.end(), {x1, y1, x2, y2});
 }
 
-SceneMesh createSceneMesh(const Chain& chain, const Wheel& wheel) {
+SceneMesh createSceneMesh(const Chain& chain, const Shape& shape) {
     SceneMesh mesh;
-    mesh.vertices.reserve((kCircleSegments + 2) * (chain.size() + wheel.size()) * 2 + 72);
+    constexpr std::size_t chainStickCount = kChainPointCount - 1;
+    constexpr std::size_t shapeStickCount = kShapePointCount * (kShapePointCount - 1) / 2;
+    mesh.vertices.reserve(
+        16 +
+        (chain.size() + shape.size()) * (kCircleSegments + 2) * 2 +
+        (chainStickCount + shapeStickCount) * 4);
 
     mesh.borderFirst = static_cast<GLsizei>(mesh.vertices.size() / 2);
     appendLine(mesh, -1.0f, -1.0f, 1.0f, -1.0f);
     appendLine(mesh, 1.0f, -1.0f, 1.0f, 1.0f);
     appendLine(mesh, 1.0f, 1.0f, -1.0f, 1.0f);
     appendLine(mesh, -1.0f, 1.0f, -1.0f, -1.0f);
-    mesh.borderCount = static_cast<GLsizei>(mesh.vertices.size() / 2) - mesh.borderFirst;
+    mesh.borderVertexCount = 8;
 
     mesh.sticksFirst = static_cast<GLsizei>(mesh.vertices.size() / 2);
     for (std::size_t i = 0; i + 1 < chain.size(); ++i) {
         appendLine(mesh, chain[i].x, chain[i].y, chain[i + 1].x, chain[i + 1].y);
     }
-    mesh.chainSticksCount = static_cast<GLsizei>((chain.size() - 1) * 2);
-    for (std::size_t i = 1; i < wheel.size(); ++i) {
-        appendLine(mesh, wheel[0].x, wheel[0].y, wheel[i].x, wheel[i].y);
-        const std::size_t next = i == wheel.size() - 1 ? 1 : i + 1;
-        appendLine(mesh, wheel[i].x, wheel[i].y, wheel[next].x, wheel[next].y);
+    for (std::size_t i = 0; i < shape.size(); ++i) {
+        for (std::size_t j = i + 1; j < shape.size(); ++j) {
+            appendLine(mesh, shape[i].x, shape[i].y, shape[j].x, shape[j].y);
+        }
     }
-    const float pinX = chain[0].x;
-    const float pinY = chain[0].y;
-    appendLine(mesh, pinX - 0.025f, pinY, pinX + 0.025f, pinY);
-    appendLine(mesh, pinX, pinY - 0.025f, pinX, pinY + 0.025f);
-    mesh.sticksCount = static_cast<GLsizei>(mesh.vertices.size() / 2) - mesh.sticksFirst;
+    mesh.sticksVertexCount =
+        static_cast<GLsizei>((chainStickCount + shapeStickCount) * 2);
 
     mesh.pointsFirst = static_cast<GLsizei>(mesh.vertices.size() / 2);
     for (const Particle& point : chain) {
         appendCircle(mesh, point.x, point.y, kPointRadius);
     }
-    for (const Particle& point : wheel) {
+    for (const Particle& point : shape) {
         appendCircle(mesh, point.x, point.y, kPointRadius);
     }
-    mesh.pointsCount = static_cast<GLsizei>(mesh.vertices.size() / 2) - mesh.pointsFirst;
     return mesh;
 }
 
@@ -194,35 +194,16 @@ void integrate(Particle& point, float deltaTime) {
     point.y += velocityY + kGravity * deltaTime * deltaTime;
 }
 
-void clampToFloor(Particle& point) {
-    if (point.y < kFloorY) {
-        point.y = kFloorY;
-        point.previousY = kFloorY;
-    }
-}
-
-void bounceWheelAtWalls(Particle& point) {
+void clampToPlayArea(Particle& point) {
     constexpr float minimum = -1.0f + kPointRadius;
     constexpr float maximum = 1.0f - kPointRadius;
-
-    if (point.x < minimum) {
-        const float incomingVelocity = point.x - point.previousX;
-        point.x = minimum;
-        point.previousX = point.x + incomingVelocity;
-    } else if (point.x > maximum) {
-        const float incomingVelocity = point.x - point.previousX;
-        point.x = maximum;
-        point.previousX = point.x + incomingVelocity;
-    }
-
-    if (point.y < minimum) {
-        const float incomingVelocity = point.y - point.previousY;
-        point.y = minimum;
-        point.previousY = point.y + incomingVelocity;
-    } else if (point.y > maximum) {
-        const float incomingVelocity = point.y - point.previousY;
-        point.y = maximum;
-        point.previousY = point.y + incomingVelocity;
+    const float clampedX = std::clamp(point.x, minimum, maximum);
+    const float clampedY = std::clamp(point.y, minimum, maximum);
+    if (point.x != clampedX || point.y != clampedY) {
+        point.x = clampedX;
+        point.y = clampedY;
+        point.previousX = clampedX;
+        point.previousY = clampedY;
     }
 }
 
@@ -251,46 +232,6 @@ void constrainDistance(
     }
 }
 
-void separateOverlappingWheelPoints(Wheel& wheel, int pinnedPoint) {
-    constexpr float minimumDistance = 2.0f * kPointRadius;
-
-    for (std::size_t i = 0; i < wheel.size(); ++i) {
-        for (std::size_t j = i + 1; j < wheel.size(); ++j) {
-            Particle& a = wheel[i];
-            Particle& b = wheel[j];
-            float dx = b.x - a.x;
-            float dy = b.y - a.y;
-            float distance = std::sqrt(dx * dx + dy * dy);
-            if (distance >= minimumDistance) {
-                continue;
-            }
-
-            if (distance <= 1.0e-6f) {
-                dx = 1.0f;
-                dy = 0.0f;
-                distance = 1.0f;
-            }
-
-            const float correction = (minimumDistance - distance) / distance;
-            const bool aPinned = static_cast<int>(i) == pinnedPoint;
-            const bool bPinned = static_cast<int>(j) == pinnedPoint;
-            if (aPinned) {
-                b.x += dx * correction;
-                b.y += dy * correction;
-            } else if (bPinned) {
-                a.x -= dx * correction;
-                a.y -= dy * correction;
-            } else {
-                const float halfCorrection = 0.5f * correction;
-                a.x -= dx * halfCorrection;
-                a.y -= dy * halfCorrection;
-                b.x += dx * halfCorrection;
-                b.y += dy * halfCorrection;
-            }
-        }
-    }
-}
-
 }  // namespace
 
 int main() {
@@ -306,21 +247,20 @@ int main() {
 
         Chain chain{};
         for (std::size_t i = 0; i < chain.size(); ++i) {
-            const float x = -0.5f + 0.1f * static_cast<float>(i);
-            chain[i] = {x, 0.8f, x, 0.8f};
+            const float x = -0.2f + 0.08f * static_cast<float>(i);
+            chain[i] = {x, 0.9f, x, 0.9f};
         }
 
-        Wheel wheel{};
-        wheel[0] = {0.5f, 0.2f, 0.5f, 0.2f};
-        for (std::size_t i = 0; i < 8; ++i) {
-            const float angle = static_cast<float>(i) * 45.0f * kPi / 180.0f;
-            const float x = 0.5f + 0.15f * std::cos(angle);
-            const float y = 0.2f + 0.15f * std::sin(angle);
-            wheel[i + 1] = {x, y, x, y};
+        Shape shape{};
+        for (std::size_t i = 0; i < shape.size(); ++i) {
+            const float angle = (90.0f + 72.0f * static_cast<float>(i)) * kPi / 180.0f;
+            const float x = 0.55f + kShapeRadius * std::cos(angle);
+            const float y = 0.55f + kShapeRadius * std::sin(angle);
+            shape[i] = {x, y, x, y};
         }
 
         GLFWwindow* nativeWindow = glfwGetCurrentContext();
-        int draggedWheelPoint = -1;
+        int draggedPoint = -1;
         bool wasMouseDown = false;
         double lastFrameTime = glfwGetTime();
         double simulationAccumulator = 0.0;
@@ -337,31 +277,46 @@ int main() {
             double cursorX = 0.0;
             double cursorY = 0.0;
             glfwGetCursorPos(nativeWindow, &cursorX, &cursorY);
-            const float mouseX = static_cast<float>(cursorX) / kPlayAreaSize * 2.0f - 1.0f;
-            const float mouseY = 1.0f - static_cast<float>(cursorY) / kPlayAreaSize * 2.0f;
-            const bool mouseDown = glfwGetMouseButton(nativeWindow, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            const float mouseX = 2.0f * static_cast<float>(cursorX) / kPlayAreaSize - 1.0f;
+            const float mouseY = 1.0f - 2.0f * static_cast<float>(cursorY) / kPlayAreaSize;
+            const bool mouseDown =
+                glfwGetMouseButton(nativeWindow, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
             if (mouseDown && !wasMouseDown) {
                 float nearestDistanceSquared = 0.2f * 0.2f;
-                for (std::size_t i = 0; i < wheel.size(); ++i) {
-                    const Particle& point = wheel[i];
-                    const float dx = point.x - mouseX;
-                    const float dy = point.y - mouseY;
+                draggedPoint = -1;
+                for (std::size_t i = 0; i < chain.size(); ++i) {
+                    const float dx = chain[i].x - mouseX;
+                    const float dy = chain[i].y - mouseY;
                     const float distanceSquared = dx * dx + dy * dy;
-                    if (distanceSquared <= nearestDistanceSquared) {
+                    if (distanceSquared < nearestDistanceSquared) {
                         nearestDistanceSquared = distanceSquared;
-                        draggedWheelPoint = static_cast<int>(i);
+                        draggedPoint = static_cast<int>(i);
+                    }
+                }
+                for (std::size_t i = 0; i < shape.size(); ++i) {
+                    const float dx = shape[i].x - mouseX;
+                    const float dy = shape[i].y - mouseY;
+                    const float distanceSquared = dx * dx + dy * dy;
+                    if (distanceSquared < nearestDistanceSquared) {
+                        nearestDistanceSquared = distanceSquared;
+                        draggedPoint = static_cast<int>(chain.size() + i);
                     }
                 }
             }
             if (!mouseDown) {
-                draggedWheelPoint = -1;
+                draggedPoint = -1;
             }
 
-            if (draggedWheelPoint >= 0) {
-                Particle& point = wheel[static_cast<std::size_t>(draggedWheelPoint)];
-                point.x = std::clamp(mouseX, -1.0f + kPointRadius, 1.0f - kPointRadius);
-                point.y = std::clamp(mouseY, -1.0f + kPointRadius, 1.0f - kPointRadius);
+            if (draggedPoint >= 0) {
+                Particle& point = draggedPoint < static_cast<int>(chain.size())
+                    ? chain[static_cast<std::size_t>(draggedPoint)]
+                    : shape[static_cast<std::size_t>(draggedPoint) - chain.size()];
+                point.x = mouseX;
+                point.y = mouseY;
+                if (draggedPoint >= static_cast<int>(chain.size())) {
+                    clampToPlayArea(point);
+                }
                 point.previousX = point.x;
                 point.previousY = point.y;
             }
@@ -371,47 +326,52 @@ int main() {
             while (simulationAccumulator >= kFixedDeltaTime) {
                 const float deltaTime = static_cast<float>(kFixedDeltaTime);
                 for (std::size_t i = 1; i < chain.size(); ++i) {
-                    integrate(chain[i], deltaTime);
-                    clampToFloor(chain[i]);
+                    if (draggedPoint != static_cast<int>(i)) {
+                        integrate(chain[i], deltaTime);
+                    }
                 }
-                for (std::size_t i = 0; i < wheel.size(); ++i) {
-                    if (static_cast<int>(i) != draggedWheelPoint) {
-                        Particle& point = wheel[i];
-                        integrate(point, deltaTime);
-                        bounceWheelAtWalls(point);
+                for (std::size_t i = 0; i < shape.size(); ++i) {
+                    if (draggedPoint != static_cast<int>(chain.size() + i)) {
+                        integrate(shape[i], deltaTime);
+                        clampToPlayArea(shape[i]);
                     }
                 }
 
                 for (int iteration = 0; iteration < kConstraintIterations; ++iteration) {
                     for (std::size_t i = 0; i + 1 < chain.size(); ++i) {
-                        constrainDistance(chain[i], chain[i + 1], 0.1f, i == 0);
-                    }
-                    for (std::size_t i = 1; i < wheel.size(); ++i) {
-                        const bool hubPinned = draggedWheelPoint == 0;
-                        const bool rimPointPinned = draggedWheelPoint == static_cast<int>(i);
+                        const bool firstPinned = i == 0 && draggedPoint != 0;
+                        const bool secondPinned = draggedPoint == static_cast<int>(i + 1);
                         constrainDistance(
-                            wheel[0], wheel[i], 0.15f, hubPinned, rimPointPinned);
-                        const std::size_t next = i == wheel.size() - 1 ? 1 : i + 1;
-                        constexpr float rimLength = 0.15f * 2.0f * std::sin(kPi / 8.0f);
-                        constrainDistance(
-                            wheel[i],
-                            wheel[next],
-                            rimLength,
-                            rimPointPinned,
-                            draggedWheelPoint == static_cast<int>(next));
+                            chain[i],
+                            chain[i + 1],
+                            0.08f,
+                            firstPinned || draggedPoint == static_cast<int>(i),
+                            secondPinned);
                     }
-                    separateOverlappingWheelPoints(wheel, draggedWheelPoint);
-                    for (std::size_t i = 1; i < chain.size(); ++i) {
-                        clampToFloor(chain[i]);
+                    for (std::size_t i = 0; i < shape.size(); ++i) {
+                        for (std::size_t j = i + 1; j < shape.size(); ++j) {
+                            const std::size_t separation =
+                                std::min(j - i, shape.size() - (j - i));
+                            const float restLength =
+                                2.0f * kShapeRadius *
+                                std::sin(static_cast<float>(separation) * kPi /
+                                         static_cast<float>(kShapePointCount));
+                            constrainDistance(
+                                shape[i],
+                                shape[j],
+                                restLength,
+                                draggedPoint == static_cast<int>(chain.size() + i),
+                                draggedPoint == static_cast<int>(chain.size() + j));
+                        }
                     }
-                    for (Particle& point : wheel) {
-                        bounceWheelAtWalls(point);
+                    for (Particle& point : shape) {
+                        clampToPlayArea(point);
                     }
                 }
                 simulationAccumulator -= kFixedDeltaTime;
             }
 
-            const SceneMesh mesh = createSceneMesh(chain, wheel);
+            const SceneMesh mesh = createSceneMesh(chain, shape);
             uploadMesh(vbo, mesh);
 
             glClear(GL_COLOR_BUFFER_BIT);
@@ -419,20 +379,16 @@ int main() {
             glBindVertexArray(vao);
 
             glUniform4f(colorLocation, 0.55f, 0.55f, 0.62f, 1.0f);
-            glDrawArrays(GL_LINES, mesh.borderFirst, mesh.borderCount);
+            glDrawArrays(GL_LINES, mesh.borderFirst, mesh.borderVertexCount);
 
             glUniform4f(colorLocation, 0.31f, 0.76f, 0.97f, 1.0f);
-            glDrawArrays(GL_LINES, mesh.sticksFirst, mesh.chainSticksCount);
-
-            glUniform4f(colorLocation, 0.9f, 0.9f, 0.95f, 1.0f);
-            glDrawArrays(
-                GL_LINES,
-                mesh.sticksFirst + mesh.chainSticksCount,
-                mesh.sticksCount - mesh.chainSticksCount);
+            glDrawArrays(GL_LINES, mesh.sticksFirst, mesh.sticksVertexCount);
 
             glUniform4f(colorLocation, 1.0f, 1.0f, 0.0f, 1.0f);
             const GLsizei pointVertexCount = kCircleSegments + 2;
-            for (GLsizei i = 0; i < mesh.pointsCount / pointVertexCount; ++i) {
+            for (GLsizei i = 0;
+                 i < static_cast<GLsizei>(chain.size() + shape.size());
+                 ++i) {
                 glDrawArrays(
                     GL_TRIANGLE_FAN,
                     mesh.pointsFirst + i * pointVertexCount,

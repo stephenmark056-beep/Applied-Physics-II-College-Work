@@ -74,7 +74,7 @@
                 "-I${workspaceFolder}/include",
                 "-I${workspaceFolder}/src",
                 "-L${workspaceFolder}/lib",
-                "D:\\Physics Programming\\OpenGL Tut\\Applied-Physics-II-College-Work\\Exams\\Midterms\\Program_1_Part_1\\main.cpp",
+                "D:\\Physics Programming\\OpenGL Tut\\Applied-Physics-II-College-Work\\Exams\\Midterms\\Program_2_Part_2\\main.cpp",
                 "${workspaceFolder}/src/core/glfw_context.cpp",
                 "${workspaceFolder}/src/core/window.cpp",
                 "${workspaceFolder}/src/core/input.cpp",
