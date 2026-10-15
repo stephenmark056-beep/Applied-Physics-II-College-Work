@@ -63,6 +63,39 @@
             ],
             "group": "build",
             "detail": "g++"
-        }
+        }, 
+         {
+            "type": "shell",
+            "label": "Build Main",
+            "command": "g++",
+            "args": [
+                "-g",
+                "-std=c++20",
+                "-I${workspaceFolder}/include",
+                "-I${workspaceFolder}/src",
+                "-L${workspaceFolder}/lib",
+                "D:\\Physics Programming\\OpenGL Tut\\Applied-Physics-II-College-Work\\Exams\\Midterms\\Program_1_Part_1\\main.cpp",
+                "${workspaceFolder}/src/core/glfw_context.cpp",
+                "${workspaceFolder}/src/core/window.cpp",
+                "${workspaceFolder}/src/core/input.cpp",
+                "${workspaceFolder}/src/glad.c",
+                "-lglfw3dll",
+                "-lopengl32",
+                "-lgdi32",
+                "-o",
+                "${workspaceFolder}/main.exe"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "g++"
+        },
     ]
 }

@@ -296,7 +296,7 @@ void separateOverlappingWheelPoints(Wheel& wheel, int pinnedPoint) {
 int main() {
     try {
         gfx::GlfwContext glfw;
-        gfx::Window window({.width = 600, .height = 600, .title = "Unit II - Reyes"});
+        gfx::Window window({.width = 600, .height = 600, .title = "Midterm - Reyes"});
 
         const GLuint program = createProgram();
         const GLint colorLocation = glGetUniformLocation(program, "uColor");
@@ -325,7 +325,7 @@ int main() {
         double lastFrameTime = glfwGetTime();
         double simulationAccumulator = 0.0;
 
-        glClearColor(0.20f, 0.10f, 0.35f, 1.0f);
+        glClearColor(0.05f, 0.35f, 0.15f, 1.0f);
 
         while (!window.shouldClose()) {
             const double currentFrameTime = glfwGetTime();
